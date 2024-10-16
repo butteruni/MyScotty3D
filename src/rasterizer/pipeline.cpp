@@ -141,7 +141,10 @@ void Pipeline<primitive_type, Program, flags>::run(std::vector<Vertex> const& ve
 		} else if constexpr ((flags & PipelineMask_Depth) == Pipeline_Depth_Less) {
 			// "Less" means the depth test passes when the new fragment has depth less than the stored depth.
 			// A1T4: Depth_Less
+
 			// TODO: implement depth test! We want to only emit fragments that have a depth less than the stored depth, hence "Depth_Less".
+            if(fb_depth < f.fb_position.z)
+                continue; 
 		} else {
 			static_assert((flags & PipelineMask_Depth) <= Pipeline_Depth_Always, "Unknown depth test flag.");
 		}
@@ -164,12 +167,12 @@ void Pipeline<primitive_type, Program, flags>::run(std::vector<Vertex> const& ve
 			} else if constexpr ((flags & PipelineMask_Blend) == Pipeline_Blend_Add) {
 				// A1T4: Blend_Add
 				// TODO: framebuffer color should have fragment color multiplied by fragment opacity added to it.
-				fb_color = sf.color; //<-- replace this line
+				fb_color += sf.color; //<-- replace this line
 			} else if constexpr ((flags & PipelineMask_Blend) == Pipeline_Blend_Over) {
 				// A1T4: Blend_Over
 				// TODO: set framebuffer color to the result of "over" blending (also called "alpha blending") the fragment color over the framebuffer color, using the fragment's opacity
 				// 		 You may assume that the framebuffer color has its alpha premultiplied already, and you just want to compute the resulting composite color
-				fb_color = sf.color; //<-- replace this line
+				fb_color = sf.color * sf.opacity; //<-- replace this line
 			} else {
 				static_assert((flags & PipelineMask_Blend) <= Pipeline_Blend_Over, "Unknown blending flag.");
 			}
@@ -348,6 +351,7 @@ void Pipeline<p, P, flags>::clip_triangle(
  *
  * If you wish to work in fixed point, check framebuffer.h for useful information about the framebuffer's dimensions.
  */
+
 template<PrimitiveType p, class P, uint32_t flags>
 void Pipeline<p, P, flags>::rasterize_line(
 	ClippedVertex const& va, ClippedVertex const& vb,
@@ -355,20 +359,66 @@ void Pipeline<p, P, flags>::rasterize_line(
 	if constexpr ((flags & PipelineMask_Interp) != Pipeline_Interp_Flat) {
 		assert(0 && "rasterize_line should only be invoked in flat interpolation mode.");
 	}
+    auto inside_diamond = [](const Vec2& point, const Vec2& pixel_center) {
+        return std::abs(point.x - pixel_center.x) + std::abs(point.y - pixel_center.y) < 0.5f;
+    };
+
 	// A1T2: rasterize_line
 
 	// TODO: Check out the block comment above this function for more information on how to fill in
 	// this function!
 	// The OpenGL specification section 3.5 may also come in handy.
+    float delta_x = std::abs(vb.fb_position.x - va.fb_position.x);
+    float delta_y = std::abs(vb.fb_position.y - va.fb_position.y);
+    // determine the longer axis
+    int i = 0, j = 1;
+    ClippedVertex va_copy = va;
+    ClippedVertex vb_copy = vb;
+    if(delta_x < delta_y) {
+        std::swap(delta_x, delta_y);
+        i = 1;
+        j = 0;
+    } 
+    if(va_copy.fb_position[i] > vb_copy.fb_position[i]) 
+        std::swap(va_copy, vb_copy);
+    int t1 = std::floor(va_copy.fb_position[i]);
+    int t2 = std::floor(vb_copy.fb_position[i]);
+    auto linear_lerp = [](float val1, float val2, float t) {
+        return val1 * (1.f - t) + t * val2;
+    };
+    if(t1 == t2) {
+        return;
+    }
+    for(int u = t1; u <= t2; ++u) {
+        float w = ((u + 0.5) - va_copy.fb_position[i]) / (delta_x);
+        float v = w * delta_y + va_copy.fb_position[j];
+        float z = linear_lerp(va_copy.fb_position.z, vb_copy.fb_position.z, w);
+        Fragment point;
+        if(j)
+            point.fb_position = Vec3(std::floor(u) + 0.5, std::floor(v) + 0.5, z);
+        else 
+            point.fb_position = Vec3(std::floor(v) + 0.5, std::floor(u) + 0.5, z);
+        point.attributes = va_copy.attributes;
+        point.derivatives.fill(Vec2(0.0f, 0.0f));
+        bool left = 1;
+        if(u == t2) {
+            if(inside_diamond(vb_copy.fb_position.xy(), point.fb_position.xy()))
+                left = 0;
+        }
+        if(left)
+            emit_fragment(point);
+    }
+	//{ // As a placeholder, draw a point in the middle of the line:
+	// 	//(remove this code once you have a real implementation)
+	//	Fragment mid;
+	//	mid.fb_position = (va.fb_position + vb.fb_position) / 2.0f;
+	//	mid.attributes = va.attributes;
+	//	mid.derivatives.fill(Vec2(0.0f, 0.0f));
+	//	emit_fragment(mid);
+	//}
+    
+    
 
-	{ // As a placeholder, draw a point in the middle of the line:
-		//(remove this code once you have a real implementation)
-		Fragment mid;
-		mid.fb_position = (va.fb_position + vb.fb_position) / 2.0f;
-		mid.attributes = va.attributes;
-		mid.derivatives.fill(Vec2(0.0f, 0.0f));
-		emit_fragment(mid);
-	}
 
 }
 
@@ -417,30 +467,145 @@ void Pipeline<p, P, flags>::rasterize_triangle(
 	//  same code paths. Be aware, however, that all of them need to remain working!
 	//  (e.g., if you break Flat while implementing Correct, you won't get points
 	//   for Flat.)
-	if constexpr ((flags & PipelineMask_Interp) == Pipeline_Interp_Flat) {
+
+    Vec2 min_corner = Vec2(
+            std::min({va.fb_position.x, vb.fb_position.x, vc.fb_position.x}),
+            std::min({va.fb_position.y, vb.fb_position.y, vc.fb_position.y})
+        );
+    Vec2 max_corner = Vec2(
+            std::max({va.fb_position.x, vb.fb_position.x, vc.fb_position.x}),
+            std::max({va.fb_position.y, vb.fb_position.y, vc.fb_position.y})
+        );
+    auto P_a = va.attributes;
+    auto P_b = vb.attributes;
+    auto P_c = vc.attributes;
+    for(auto &val:P_a) val = val * va.inv_w;
+    for(auto &val:P_b) val = val * vb.inv_w;
+    for(auto &val:P_c) val = val * vc.inv_w;
+    Vec2 dx = Vec2(1.0f, 0.0f);
+    Vec2 dy = Vec2(0.0f, 1.0f);
+    float area = std::abs(cross(va.fb_position.xy() - vb.fb_position.xy(), va.fb_position.xy() - vc.fb_position.xy()));
+    auto is_inside_triangle = [](const Vec2 &point, const Vec2 &a, const Vec2 &b, const Vec2 &c){
+        float value1 = cross(a - c, a - b) * cross(a - c, a - point);
+        float value2 = cross(b - a, b - c) * cross(b - a, b - point);
+        float value3 = cross(c - b, c - a) * cross(c - b, c - point);
+        return (value1 > 0 && value2 > 0 && value3 > 0) || (value1 < 0 && value2 < 0 && value3 < 0); 
+    };
+    auto compute_fragment_sommth = [&](Vec2 pixel_center) {
+        float areaA = std::abs(cross(pixel_center - vb.fb_position.xy(), pixel_center - vc.fb_position.xy()));
+        float areaB = std::abs(cross(pixel_center - va.fb_position.xy(), pixel_center - vc.fb_position.xy()));
+        float areaC = std::abs(cross(pixel_center - vb.fb_position.xy(), pixel_center - va.fb_position.xy()));
+        float phi_a = areaA / area;
+        float phi_b = areaB / area;
+        float phi_c = areaC / area;
+        float z = va.fb_position.z * areaA / area + vb.fb_position.z * areaB / area + vc.fb_position.z * areaC / area;
+        if(phi_a + phi_b + phi_c > 1) {
+            if(std::abs(-phi_a  + phi_b + phi_c - 1) < EPS_F) phi_a *= -1;
+            if(std::abs(phi_a - phi_b + phi_c - 1) < EPS_F) phi_b *= -1;
+            if(std::abs(phi_a + phi_b - phi_c - 1) < EPS_F) phi_c *= 1;
+        }
+        Fragment fragment;
+        fragment.fb_position = Vec3(pixel_center.x, pixel_center.y, z);
+        for(size_t index = 0;index < fragment.attributes.size();++index)
+            fragment.attributes[index] = va.attributes[index] * phi_a
+                                        + vb.attributes[index] * phi_b 
+                                        + vc.attributes[index] * phi_c;
+        return fragment;
+    };
+    auto compute_fragment_screen = [&](Vec2 pixel_center) {
+        Fragment fragment;
+        float areaA = std::abs(cross(pixel_center - vb.fb_position.xy(), pixel_center - vc.fb_position.xy()));
+        float areaB = std::abs(cross(pixel_center - va.fb_position.xy(), pixel_center - vc.fb_position.xy()));
+        float areaC = std::abs(cross(pixel_center - vb.fb_position.xy(), pixel_center - va.fb_position.xy()));
+        float phi_a = areaA / area;
+        float phi_b = areaB / area;
+        float phi_c = areaC / area;
+        if(phi_a + phi_b + phi_c > 1) {
+            if(std::abs(-phi_a  + phi_b + phi_c - 1) < EPS_F) phi_a *= -1;
+            if(std::abs(phi_a - phi_b + phi_c - 1) < EPS_F) phi_b *= -1;
+            if(std::abs(phi_a + phi_b - phi_c - 1) < EPS_F) phi_c *= 1;
+        }
+
+        float z = va.fb_position.z * phi_a + vb.fb_position.z * phi_b + vc.fb_position.z * phi_c;
+        float Z_interp = phi_a * va.inv_w
+                       + phi_b * vb.inv_w
+                       + phi_c * vc.inv_w;
+        fragment.fb_position = Vec3(pixel_center.x, pixel_center.y, z);
+        for(size_t index = 0;index < fragment.attributes.size();++index) {
+            auto P_interp = P_a[index] * phi_a + P_b[index] * phi_b + P_c[index] * phi_c;
+            fragment.attributes[index] = P_interp / Z_interp;
+        }
+        return fragment;
+   
+    };
+    if constexpr ((flags & PipelineMask_Interp) == Pipeline_Interp_Flat) {
 		// A1T3: flat triangles
 		// TODO: rasterize triangle (see block comment above this function).
-
 		// As a placeholder, here's code that draws some lines:
 		//(remove this and replace it with a real solution)
-		Pipeline<PrimitiveType::Lines, P, flags>::rasterize_line(va, vb, emit_fragment);
-		Pipeline<PrimitiveType::Lines, P, flags>::rasterize_line(vb, vc, emit_fragment);
-		Pipeline<PrimitiveType::Lines, P, flags>::rasterize_line(vc, va, emit_fragment);
-	} else if constexpr ((flags & PipelineMask_Interp) == Pipeline_Interp_Smooth) {
+        
+		// Pipeline<PrimitiveType::Lines, P, flags>::rasterize_line(va, vb, emit_fragment);
+		// Pipeline<PrimitiveType::Lines, P, flags>::rasterize_line(vb, vc, emit_fragment);
+		// Pipeline<PrimitiveType::Lines, P, flags>::rasterize_line(vc, va, emit_fragment);
+        for (int x = std::floor(min_corner.x); x <= std::ceil(max_corner.x); ++x) {
+            for (int y = std::floor(min_corner.y); y <= std::ceil(max_corner.y); ++y) {
+                Vec2 pixel_center = Vec2(x + 0.5f, y + 0.5f);
+                // Check if the pixel is inside the triangle
+                if (is_inside_triangle(pixel_center, va.fb_position.xy(), vb.fb_position.xy(), vc.fb_position.xy())) {
+                    Fragment fragment;
+                    fragment.fb_position = Vec3(pixel_center.x, pixel_center.y, va.fb_position.z);
+                    fragment.attributes = va.attributes;
+                    fragment.derivatives.fill(Vec2(0.0f, 0.0f));
+                    emit_fragment(fragment);
+                }
+            }
+        }
+    } else if constexpr ((flags & PipelineMask_Interp) == Pipeline_Interp_Smooth) {
 		// A1T5: screen-space smooth triangles
 		// TODO: rasterize triangle (see block comment above this function).
 
 		// As a placeholder, here's code that calls the Flat interpolation version of the function:
 		//(remove this and replace it with a real solution)
-		Pipeline<PrimitiveType::Lines, P, (flags & ~PipelineMask_Interp) | Pipeline_Interp_Flat>::rasterize_triangle(va, vb, vc, emit_fragment);
+		// Pipeline<PrimitiveType::Lines, P, (flags & ~PipelineMask_Interp) | Pipeline_Interp_Flat>::rasterize_triangle(va, vb, vc, emit_fragment);	   
+        for (int x = std::floor(min_corner.x); x <= std::ceil(max_corner.x); ++x) {
+            for (int y = std::floor(min_corner.y); y <= std::ceil(max_corner.y); ++y) {
+                Vec2 pixel_center = Vec2(x + 0.5f, y + 0.5f);
+                // Check if the pixel is inside the triangle
+                if (is_inside_triangle(pixel_center, va.fb_position.xy(), vb.fb_position.xy(), vc.fb_position.xy())) {
+                    Fragment fragment = compute_fragment_sommth(pixel_center);
+                    Fragment fragment_dx = compute_fragment_sommth(pixel_center + dx);
+                    Fragment fragment_dy = compute_fragment_sommth(pixel_center + dy);
+                    for(size_t index = 0; index < fragment.derivatives.size();++index) {
+                        fragment.derivatives[index] = Vec2(fragment_dx.attributes[index] - fragment.attributes[index], fragment_dy.attributes[index] - fragment.attributes[index]);
+                    }
+                    emit_fragment(fragment);
+                }
+            }
+        }
+
 	} else if constexpr ((flags & PipelineMask_Interp) == Pipeline_Interp_Correct) {
 		// A1T5: perspective correct triangles
 		// TODO: rasterize triangle (block comment above this function).
 
 		// As a placeholder, here's code that calls the Screen-space interpolation function:
 		//(remove this and replace it with a real solution)
-		Pipeline<PrimitiveType::Lines, P, (flags & ~PipelineMask_Interp) | Pipeline_Interp_Smooth>::rasterize_triangle(va, vb, vc, emit_fragment);
-	}
+		// Pipeline<PrimitiveType::Lines, P, (flags & ~PipelineMask_Interp) | Pipeline_Interp_Smooth>::rasterize_triangle(va, vb, vc, emit_fragment);
+	    for (int x = std::floor(min_corner.x); x <= std::ceil(max_corner.x); ++x) {
+            for (int y = std::floor(min_corner.y); y <= std::ceil(max_corner.y); ++y) {
+                Vec2 pixel_center = Vec2(x + 0.5f, y + 0.5f);
+                // Check if the pixel is inside the triangle
+                if (is_inside_triangle(pixel_center, va.fb_position.xy(), vb.fb_position.xy(), vc.fb_position.xy())) {
+                    Fragment fragment = compute_fragment_screen(pixel_center);
+                    Fragment fragment_dx = compute_fragment_screen(pixel_center + dx);
+                    Fragment fragment_dy = compute_fragment_screen(pixel_center + dy);
+                    for(size_t index = 0; index < fragment.derivatives.size();++index) {
+                        fragment.derivatives[index] = Vec2(fragment_dx.attributes[index] - fragment.attributes[index], fragment_dy.attributes[index] - fragment.attributes[index]);
+                    } 
+                    emit_fragment(fragment);
+                }
+            }
+        }
+    }
 }
 
 //-------------------------------------------------------------------------

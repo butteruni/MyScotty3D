@@ -201,3 +201,7 @@ inline std::ostream& operator<<(std::ostream& out, Vec2 v) {
 	out << "{" << v.x << "," << v.y << "}";
 	return out;
 }
+
+inline float cross(Vec2 a, Vec2 b) {
+        return a.x * b.y - a.y * b.x;
+    }

@@ -123,9 +123,12 @@ struct Lambertian {
 		// reading onward, you will discover that \rho can be computed in a number of ways
 		//  it is up to you to select one that makes sense in this context
 
-		float lod = 0.0f; //<-- replace this line
+		//float lod = 0.0f; //<-- replace this line
 		//-----
-
+        float rho = std::max(fdx_texcoord.norm() * wh.x, fdy_texcoord.norm() * wh.y);
+        float lod = std::log2(rho);
+        if(lod < 0)
+            lod = 0;
 		Vec3 normal = fa_normal.unit();
 
 		Spectrum light =

@@ -32,7 +32,7 @@ struct Framebuffer {
 	uint32_t index(uint32_t x, uint32_t y, uint32_t s) const {
 		// A1T7: index
 		// TODO: update to provide different storage locations for different samples
-		return y * width + x;
+		return (y * width + x) * (colors.size() / width / height) + s;
 	}
 
 	// helpers that look up colors and depths for sample s of pixel (x,y):
