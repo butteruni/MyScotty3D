@@ -13,7 +13,7 @@
  */
 void Halfedge_Mesh::triangulate() {
 	//A2G1: triangulation
-	
+    	
 }
 
 /*

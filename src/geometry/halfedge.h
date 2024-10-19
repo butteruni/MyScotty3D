@@ -429,7 +429,6 @@ public:
 
 	//generate a cube:
 	static Halfedge_Mesh cube(float cube_radius);
-
 	//DEBUG: so test cases compile -- but this is going away:
 	//TODO: remove this constructor:
 	Halfedge_Mesh(std::vector< std::vector< Index > > const &faces, std::vector< Vec3 > const &vertices) {
