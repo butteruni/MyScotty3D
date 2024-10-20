@@ -266,9 +266,8 @@ std::optional<Halfedge_Mesh::VertexRef> Halfedge_Mesh::split_edge(EdgeRef e) {
     t->twin = new_h;
     t->vertex = new_v;
     new_h->face = f;
-    
+    f->halfedge = new_h;
     h->vertex = new_v;
-    new_v->halfedge = h;
     h->edge = new_edge;
     new_edge->halfedge = h;
     h->face = new_face;
@@ -281,7 +280,7 @@ std::optional<Halfedge_Mesh::VertexRef> Halfedge_Mesh::split_edge(EdgeRef e) {
     new_t->face = t->face;
     new_t->next = t;
     if(add_one)
-        h_next->twin->next = new_t;
+        t_pre->next = new_t;
     EdgeRef insert_edge = emplace_edge(); 
     HalfedgeRef insert_h = emplace_halfedge();
     insert_h->vertex = v3;
@@ -297,11 +296,11 @@ std::optional<Halfedge_Mesh::VertexRef> Halfedge_Mesh::split_edge(EdgeRef e) {
     insert_t->vertex = new_v;
     insert_t->next = h_next_next;
     insert_t->edge = insert_edge;
+    new_v->halfedge = insert_t;
     new_h->next = insert_t;
     insert_t->face = f;
     f->halfedge = insert_t;
     tmp = f->halfedge;
-    
     if(!add_one) {
         new_face = emplace_face();
         tmp = t_pre;
@@ -316,6 +315,7 @@ std::optional<Halfedge_Mesh::VertexRef> Halfedge_Mesh::split_edge(EdgeRef e) {
         twice_h->edge = twice_edge;
         twice_t->edge = twice_edge;
         twice_h->face = t->face;
+        t->face->halfedge = twice_h;
         twice_h->next = t;
         t_pre_pre->next = twice_h;
         twice_h->vertex = t_pre->vertex;
