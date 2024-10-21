@@ -45,7 +45,18 @@ struct BBox {
 	Vec3 center() const {
 		return (min + max) * 0.5f;
 	}
-
+    Vec3 dia() const {
+        return max - min;
+    }
+    int maxExtent() const {
+        Vec3 d = max - min;
+        if (d.x > d.y && d.x > d.z)
+            return 0;
+        else if (d.y > d.z)
+            return 1;
+        else
+            return 2;
+    }
 	// Check whether box has no volume
 	bool empty() const {
 		return min.x > max.x || min.y > max.y || min.z > max.z;
@@ -85,8 +96,37 @@ struct BBox {
 		// If the ray intersected the bounding box within the range given by
 		// [times.x,times.y], update times with the new intersection times.
 		// This means at least one of tmin and tmax must be within the range
+        Vec3 bbox_min = min;
+        Vec3 bbox_max = max;
+        ray.dir.norm(); 
+        float tmin = (bbox_min.x - ray.point.x) / ray.dir.x;
+        float tmax = (bbox_max.x - ray.point.x) / ray.dir.x;
 
-		return false;
+        if (ray.dir.x > 0) std::swap(tmin, tmax);
+
+        float tymin = (bbox_min.y - ray.point.y) / ray.dir.y;
+        float tymax = (bbox_max.y - ray.point.y) / ray.dir.y;
+
+        if (ray.dir.y > 0) std::swap(tymin, tymax);
+
+        if (tymin > tmin) tmin = tymin;
+        if (tymax < tmax) tmax = tymax;
+
+        float tzmin = (bbox_min.z - ray.point.z) / ray.dir.z;
+        float tzmax = (bbox_max.z - ray.point.z) / ray.dir.z;
+
+        if (ray.dir.z > 0) std::swap(tzmin, tzmax);
+
+        if (tzmin > tmin) tmin = tzmin;
+        if (tzmax < tmax) tmax = tzmax;
+
+        if (tmin <= times.y && tmax >= times.x) {
+            times.x = std::max(tmin, times.x);
+            times.y = std::min(tmax, times.y);
+            return true;
+        }
+
+        return false;
 	}
 
 	/// Get the eight corner points of the bounding box

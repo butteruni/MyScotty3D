@@ -37,6 +37,26 @@ PT::Trace Sphere::hit(Ray ray) const {
     ret.position = Vec3{}; // where was the intersection?
     ret.normal = Vec3{};   // what was the surface normal at the intersection?
 	ret.uv = Vec2{}; 	   // what was the uv coordinates at the intersection? (you may find Sphere::uv to be useful)
+
+    Vec3 o = ray.point;
+    Vec3 d = ray.dir;
+    float a = d.norm_squared();
+    float b = 2 * dot(o, d);
+    float c = o.norm_squared() - radius * radius;
+    float t1 = (-b + std::sqrt(b * b - 4 * a * c)) / (2 * a);
+    float t2 = (-b - std::sqrt(b * b - 4 * a * c)) / (2 * a);
+    if(t1 > 0 && t2 < 0) {
+        ret.hit = true;
+        ret.position = o + d * t1;
+    }
+    if(t2 > 0) {
+        ret.hit = true;
+        ret.position = o + d * t2;
+    }
+    ret.distance = (ret.position - ret.origin).norm();
+    Vec3 dir = ret.position;
+    ret.uv = uv(dir.normalize());
+    ret.normal = dir;
     return ret;
 }
 

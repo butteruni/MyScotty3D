@@ -3,7 +3,7 @@
 #include "aggregate.h"
 #include "instance.h"
 #include "tri_mesh.h"
-
+#include <functional>
 #include <stack>
 
 namespace PT {
@@ -20,7 +20,108 @@ struct SAHBucketData {
 	BBox bb;          ///< bbox of all primitives
 	size_t num_prims; ///< number of primitives in the bucket
 };
+template <typename Primitive>
+size_t BVH<Primitive>::build_recursive(size_t max_leaf_size, size_t start, size_t size) {
+    size_t node_idx = new_node();
+    BBox bound = BBox();
+    for(size_t i = start; i < start + size; ++i) {
+        bound.enclose(primitives.at(i).bbox());
+    }
 
+    nodes.at(node_idx).size = size;
+    nodes.at(node_idx).start = start;
+    nodes.at(node_idx).bbox = bound;
+    bound.max += Vec3(1.f, 1.f, 1.f);
+    if(size < max_leaf_size) {
+        nodes.at(node_idx).l = node_idx;
+        nodes.at(node_idx).r = node_idx;
+        return node_idx;
+    }
+    constexpr size_t bucket_size = 8;
+    std::vector<Primitive> Partitions[2];
+    float minCost = FLT_MAX;
+    for(size_t dim = 0; dim < 3; ++dim) {
+
+        float bucket_len = bound.dia()[dim] / bucket_size;
+        float left = bound.min[dim];
+        std::vector<std::vector<Primitive>> buckets(bucket_size);
+        std::vector<BBox> bboxOfBuckets(bucket_size);
+        for(size_t i = start; i < start + size; ++i) {
+            BBox box = primitives.at(i).bbox();
+            float center = box.center()[dim];
+            size_t bucket_id = std::floor((center - left) / bucket_len);
+            buckets.at(bucket_id).push_back(std::move(primitives[i]));
+            bboxOfBuckets.at(bucket_id).enclose(box);
+        }
+        
+        std::vector<BBox> leftBox(bucket_size);
+        std::vector<size_t> leftAccNum(bucket_size);
+        leftAccNum[0] = 0;
+        std::vector<BBox> rightBox(bucket_size);
+        std::vector<size_t> rightAccNum(bucket_size);
+        rightAccNum[0] = 0;
+        for(size_t i = 1;i < bucket_size;++i) {
+            leftBox[i] = leftBox[i - 1];
+            leftBox[i].enclose(bboxOfBuckets[i - 1]);
+            leftAccNum[i] = leftAccNum[i - 1] + buckets[i - 1].size();
+            
+            rightBox[i] = rightBox[i - 1];
+            rightBox[i].enclose(bboxOfBuckets[bucket_size - i]);
+            rightAccNum[i] = rightAccNum[i - 1] + buckets[bucket_size - i].size();
+        }
+
+        size_t minLeftIdx = 0;
+        float dimBestCost = FLT_MAX;
+        for(size_t leftIdx = 1;leftIdx < bucket_size; ++leftIdx) {
+            size_t rightIdx = bucket_size - leftIdx;
+            float leftS = leftBox.at(leftIdx).surface_area();
+            float rightS = rightBox.at(rightIdx).surface_area();
+            float leftN = leftAccNum.at(leftIdx);
+            float rightN = rightAccNum.at(rightIdx);
+        
+            float curCost = leftS * leftN + rightS * rightN;
+            if(curCost < dimBestCost) {
+                dimBestCost = curCost;
+                minLeftIdx = leftIdx;
+            }
+        }
+
+        if(dimBestCost < minCost) {
+            minCost = dimBestCost;
+            Partitions[0].clear();
+            Partitions[1].clear();
+
+            for(size_t i = 0;i < minLeftIdx; ++i) {
+                for(size_t j = 0;j < buckets[i].size(); j++)
+                    Partitions[0].push_back(std::move(buckets[i][j]));
+            }
+            for(size_t i = minLeftIdx;i < bucket_size;++i) {
+                for(size_t j = 0; j < buckets[i].size(); j++)
+                    Partitions[1].push_back(std::move(buckets[i][j]));
+            }
+        }
+    }
+    if(Partitions[0].size() == size || Partitions[1].size() == size) {
+        int left_size = size / 2;
+        size_t l = build_recursive(max_leaf_size, start, left_size);
+        size_t r = build_recursive(max_leaf_size, start + left_size, size - left_size);
+        nodes.at(node_idx).l = l;
+        nodes.at(node_idx).r = r;
+        return node_idx;
+    }
+
+    for(size_t i = 0;i < Partitions[0].size();++i) {
+        primitives.at(i + start) = std::move(Partitions[0][i]);
+    }
+    for(size_t i = 0;i < Partitions[1].size(); ++i) {
+        primitives.at(i + start + Partitions[0].size()) =  std::move(Partitions[1][i]);
+    }
+    size_t l = build_recursive(max_leaf_size, start, Partitions[0].size());
+    size_t r = build_recursive(max_leaf_size, start + Partitions[0].size(), Partitions[1].size());
+    nodes.at(node_idx).l = l;
+    nodes.at(node_idx).r = r;
+    return node_idx;
+}
 template<typename Primitive>
 void BVH<Primitive>::build(std::vector<Primitive>&& prims, size_t max_leaf_size) {
 	//A3T3 - build a bvh
@@ -28,12 +129,11 @@ void BVH<Primitive>::build(std::vector<Primitive>&& prims, size_t max_leaf_size)
 	// Keep these
     nodes.clear();
     primitives = std::move(prims);
-
     // Construct a BVH from the given vector of primitives and maximum leaf
     // size configuration.
-
 	//TODO
-
+    build_recursive(max_leaf_size, 0, primitives.size());
+ 
 }
 
 template<typename Primitive> Trace BVH<Primitive>::hit(const Ray& ray) const {

@@ -25,7 +25,7 @@ public:
 	BVH() = default;
 	BVH(std::vector<Primitive>&& primitives, size_t max_leaf_size = 1);
 	void build(std::vector<Primitive>&& primitives, size_t max_leaf_size = 1);
-
+    size_t build_recursive(size_t max_leaf_size, size_t start, size_t size);
 	BVH(BVH&& src) = default;
 	BVH& operator=(BVH&& src) = default;
 

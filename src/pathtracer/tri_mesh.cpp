@@ -14,8 +14,23 @@ BBox Triangle::bbox() const {
 
     // Beware of flat/zero-volume boxes! You may need to
     // account for that here, or later on in BBox::hit.
-
+    Vec3 v0_pos = (vertex_list[v0]).position;
+    Vec3 v1_pos = (vertex_list[v1]).position;
+    Vec3 v2_pos = (vertex_list[v2]).position;
+    Vec3 min(
+        std::min({v0_pos.x, v1_pos.x, v2_pos.x}),
+        std::min({v0_pos.y, v1_pos.y, v2_pos.y}),
+        std::min({v0_pos.z, v1_pos.z, v2_pos.z})
+    );
+    
+    Vec3 max(
+        std::max({v0_pos.x, v1_pos.x, v2_pos.x}),
+        std::max({v0_pos.y, v1_pos.y, v2_pos.y}),
+        std::max({v0_pos.z, v1_pos.z, v2_pos.z})
+    );
     BBox box;
+    box.min = min;
+    box.max = max;
     return box;
 }
 
@@ -26,13 +41,13 @@ Trace Triangle::hit(const Ray& ray) const {
     Tri_Mesh_Vert v_0 = vertex_list[v0];
     Tri_Mesh_Vert v_1 = vertex_list[v1];
     Tri_Mesh_Vert v_2 = vertex_list[v2];
-    (void)v_0;
-    (void)v_1;
-    (void)v_2;
-
+    Vec3 s = ray.point - v_0.position;
+    Vec3 e1 = v_1.position - v_0.position;
+    Vec3 e2 = v_2.position - v_0.position;
+    Vec3 d = ray.dir;
     // TODO (PathTracer): Task 2
     // Intersect the ray with the triangle defined by the three vertices.
-
+    float denom = dot(cross(e1, d),e2);
     Trace ret;
     ret.origin = ray.point;
     ret.hit = false;       // was there an intersection?
@@ -41,7 +56,21 @@ Trace Triangle::hit(const Ray& ray) const {
     ret.normal = Vec3{};   // what was the surface normal at the intersection?
                            // (this should be interpolated between the three vertex normals)
 	ret.uv = Vec2{};	   // What was the uv associated with the point of intersection?
-						   // (this should be interpolated between the three vertex uvs)
+					   // (this should be interpolated between the three vertex uvs)
+    if( std::abs(denom) < EPS_F) {
+        return ret;
+    }
+    float u = -dot(cross(s, e2), d) / denom;
+    float v =  dot(cross(e1, d), s) / denom;
+    float t = -dot(cross(s, e2), e1) / denom;
+    if(u < 0 || v < 0 || u + v > 1 || u > 1 || v > 1 || t < 0) {
+        return ret;
+    }
+    ret.hit = true;
+    ret.position = v_0.position + u * e1 + v * e2;
+    ret.distance = (ret.position - ret.origin).norm();
+    ret.normal = (1.f - u - v) * v_0.normal + u * v_1.normal + v * v_2.normal;
+    ret.uv = (1.f - u - v) * v_0.uv + u * v_1.uv + v * v_2.uv;
     return ret;
 }
 
