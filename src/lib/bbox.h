@@ -96,38 +96,23 @@ struct BBox {
 		// If the ray intersected the bounding box within the range given by
 		// [times.x,times.y], update times with the new intersection times.
 		// This means at least one of tmin and tmax must be within the range
-        Vec3 bbox_min = min;
-        Vec3 bbox_max = max;
-        ray.dir.norm(); 
-        float tmin = (bbox_min.x - ray.point.x) / ray.dir.x;
-        float tmax = (bbox_max.x - ray.point.x) / ray.dir.x;
-
-        if (ray.dir.x > 0) std::swap(tmin, tmax);
-
-        float tymin = (bbox_min.y - ray.point.y) / ray.dir.y;
-        float tymax = (bbox_max.y - ray.point.y) / ray.dir.y;
-
-        if (ray.dir.y > 0) std::swap(tymin, tymax);
-
-        if (tymin > tmin) tmin = tymin;
-        if (tymax < tmax) tmax = tymax;
-
-        float tzmin = (bbox_min.z - ray.point.z) / ray.dir.z;
-        float tzmax = (bbox_max.z - ray.point.z) / ray.dir.z;
-
-        if (ray.dir.z > 0) std::swap(tzmin, tzmax);
-
-        if (tzmin > tmin) tmin = tzmin;
-        if (tzmax < tmax) tmax = tzmax;
-
-        if (tmin <= times.y && tmax >= times.x) {
-            times.x = std::max(tmin, times.x);
-            times.y = std::min(tmax, times.y);
-            return true;
+        Vec3 origin = ray.point;
+        Vec3 d = 1.f / ray.dir;
+        float tmax = times.y, tmin = times.x; 
+        for(size_t i = 0; i < 3; ++i) {
+            float t0 = (min[i] - origin[i]) * d[i];
+            float t1 = (max[i] - origin[i]) * d[i];
+            if(d[i] < 0.f) {
+                std::swap(t0, t1);
+            }
+            tmin = std::max(tmin, t0);
+            tmax = std::min(tmax, t1);
+            if(tmax < tmin)
+                return false;
         }
-
-        return false;
-	}
+        times = Vec2(tmin, tmax);
+        return true;
+    }
 
 	/// Get the eight corner points of the bounding box
 	std::vector<Vec3> corners() const {

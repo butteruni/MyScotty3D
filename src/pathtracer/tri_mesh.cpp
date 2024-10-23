@@ -61,9 +61,13 @@ Trace Triangle::hit(const Ray& ray) const {
         return ret;
     }
     float u = -dot(cross(s, e2), d) / denom;
+    if(u < 0 || u > 1)
+        return ret;
     float v =  dot(cross(e1, d), s) / denom;
+    if(v < 0 || u + v > 1)
+        return ret;
     float t = -dot(cross(s, e2), e1) / denom;
-    if(u < 0 || v < 0 || u + v > 1 || u > 1 || v > 1 || t < 0) {
+    if(t < 0) {
         return ret;
     }
     ret.hit = true;

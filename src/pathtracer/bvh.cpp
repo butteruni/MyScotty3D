@@ -3,9 +3,10 @@
 #include "aggregate.h"
 #include "instance.h"
 #include "tri_mesh.h"
+#include <cfloat>
 #include <functional>
 #include <stack>
-
+#include <iostream>
 namespace PT {
 
 struct BVHBuildData {
@@ -27,17 +28,16 @@ size_t BVH<Primitive>::build_recursive(size_t max_leaf_size, size_t start, size_
     for(size_t i = start; i < start + size; ++i) {
         bound.enclose(primitives.at(i).bbox());
     }
-
     nodes.at(node_idx).size = size;
     nodes.at(node_idx).start = start;
     nodes.at(node_idx).bbox = bound;
-    bound.max += Vec3(1.f, 1.f, 1.f);
-    if(size < max_leaf_size) {
+
+    if(size <= max_leaf_size) {
         nodes.at(node_idx).l = node_idx;
         nodes.at(node_idx).r = node_idx;
         return node_idx;
     }
-    constexpr size_t bucket_size = 8;
+    size_t bucket_size = 8;
     std::vector<Primitive> Partitions[2];
     float minCost = FLT_MAX;
     for(size_t dim = 0; dim < 3; ++dim) {
@@ -49,7 +49,9 @@ size_t BVH<Primitive>::build_recursive(size_t max_leaf_size, size_t start, size_
         for(size_t i = start; i < start + size; ++i) {
             BBox box = primitives.at(i).bbox();
             float center = box.center()[dim];
-            size_t bucket_id = std::floor((center - left) / bucket_len);
+            size_t bucket_id = (center - left) / bucket_len;
+            if(bucket_id == bucket_size)
+                bucket_id--;
             buckets.at(bucket_id).push_back(std::move(primitives[i]));
             bboxOfBuckets.at(bucket_id).enclose(box);
         }
@@ -109,15 +111,16 @@ size_t BVH<Primitive>::build_recursive(size_t max_leaf_size, size_t start, size_
         nodes.at(node_idx).r = r;
         return node_idx;
     }
-
-    for(size_t i = 0;i < Partitions[0].size();++i) {
+    size_t size_0 = Partitions[0].size();
+    for(size_t i = 0;i < size_0;++i) {
         primitives.at(i + start) = std::move(Partitions[0][i]);
     }
-    for(size_t i = 0;i < Partitions[1].size(); ++i) {
-        primitives.at(i + start + Partitions[0].size()) =  std::move(Partitions[1][i]);
+    size_t size_1 = Partitions[1].size();
+    for(size_t i = 0;i < size_1; ++i) {
+        primitives.at(i + start + size_0) =  std::move(Partitions[1][i]);
     }
-    size_t l = build_recursive(max_leaf_size, start, Partitions[0].size());
-    size_t r = build_recursive(max_leaf_size, start + Partitions[0].size(), Partitions[1].size());
+    size_t l = build_recursive(max_leaf_size, start, size_0);
+    size_t r = build_recursive(max_leaf_size, start + size_0, size_1);
     nodes.at(node_idx).l = l;
     nodes.at(node_idx).r = r;
     return node_idx;
@@ -132,7 +135,7 @@ void BVH<Primitive>::build(std::vector<Primitive>&& prims, size_t max_leaf_size)
     // Construct a BVH from the given vector of primitives and maximum leaf
     // size configuration.
 	//TODO
-    build_recursive(max_leaf_size, 0, primitives.size());
+    root_idx = build_recursive(max_leaf_size, 0, primitives.size());
  
 }
 
@@ -147,10 +150,39 @@ template<typename Primitive> Trace BVH<Primitive>::hit(const Ray& ray) const {
     // Again, remember you can use hit() on any Primitive value.
 
 	//TODO: replace this code with a more efficient traversal:
-    Trace ret;
-    for(const Primitive& prim : primitives) {
-        Trace hit = prim.hit(ray);
-        ret = Trace::min(ret, hit);
+    Trace ret = Trace();
+    if(primitives.size() == 0) {
+        return ret;
+    }
+    std::stack<size_t> s;
+    Vec2 time = Vec2(0.f, FLT_MAX);
+    s.push(root_idx);
+    auto hit_check = [&](size_t idx) {
+        auto &node = nodes[idx];
+        if(node.is_leaf()) {
+            for(size_t i = node.start; i < node.start + node.size; ++i) {
+                Trace hit = primitives.at(i).hit(ray); 
+                if(hit.hit)
+                    time[1] = std::min(time[1], hit.distance); 
+                ret = Trace::min(ret, hit);
+            }
+        }else {        
+            Vec2 tmp = time; 
+            bool leftHit = nodes[node.l].bbox.hit(ray, tmp);
+            tmp = time;
+            bool rightHit = nodes[node.r].bbox.hit(ray, tmp);
+            if(leftHit) {
+                s.push(node.l);
+            }
+            if(rightHit) {
+                s.push(node.r);
+            }
+        }
+    };
+    while(s.size()) {
+        size_t idx = s.top();
+        s.pop();
+        hit_check(idx);
     }
     return ret;
 }
