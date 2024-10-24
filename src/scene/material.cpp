@@ -10,8 +10,8 @@ Vec3 reflect(Vec3 dir) {
     // Return direction to incoming light that would be
 	// reflected out in direction dir from surface
 	// with normal (0,1,0)
-
-    return Vec3{};
+    Vec3 normal = Vec3(0, 1, 0);
+    return -dir + 2 * dot(normal, dir) * normal;
 }
 
 Vec3 refract(Vec3 out_dir, float index_of_refraction, bool& was_internal) {
@@ -23,15 +23,28 @@ Vec3 refract(Vec3 out_dir, float index_of_refraction, bool& was_internal) {
 	// and false otherwise.
 
 	// The surface normal is (0,1,0)
+    Vec3 normal = Vec3(0.f, 1.f, 0.f);
+    float cosTheta_i = dot(normal, out_dir);
+    float eta = index_of_refraction;
+    if(cosTheta_i < 0) {
+        eta = 1.f / eta;
+        normal *= -1;
+        cosTheta_i *= -1;
+    }
+    float sin2Theta_i = std::max(0.f, 1.f - cosTheta_i * cosTheta_i);
+    float sin2Theta_t = sin2Theta_i / (eta * eta);
+    float cosTheta_t = std::sqrt(1.f - sin2Theta_t);
 
-	return Vec3{};
+    return  -out_dir / eta + (cosTheta_i / eta - cosTheta_t) * normal; 
 }
 
 float schlick(Vec3 in_dir, float index_of_refraction) {
 	//A3T5 Materials - Schlick's approximation helper
 
 	// Implement Schlick's approximation of the Fresnel reflection factor.
-
+    float cos_theta = in_dir.y; 
+    float r0 = pow((1.0f - index_of_refraction) / (1.0f + index_of_refraction), 2.0f);
+    return r0 + (1.0f - r0) * pow(1.0f - cos_theta, 5.0f);
 	return 0.0f;
 }
 
@@ -42,21 +55,23 @@ Spectrum Lambertian::evaluate(Vec3 out, Vec3 in, Vec2 uv) const {
     // is reflected through out_dir: (albedo / PI_F) * cos(theta).
     // Note that for Scotty3D, y is the 'up' direction.
 
-    return Spectrum{};
+    Spectrum tmp = albedo.lock()->evaluate(uv);
+
+    return tmp / PI_F * in.y;
 }
 
 Scatter Lambertian::scatter(RNG &rng, Vec3 out, Vec2 uv) const {
 	//A3T4: Materials - Lambertian BSDF scattering
 	//Select a scattered light direction at random from the Lambertian BSDF
 
-	[[maybe_unused]] Samplers::Hemisphere::Cosine sampler; //this will be useful
+	Samplers::Hemisphere::Cosine sampler; //this will be useful
 
 	Scatter ret;
 	//TODO: sample the direction the light was scatter from from a cosine-weighted hemisphere distribution:
-	ret.direction = Vec3{};
+	ret.direction = sampler.sample(rng);
 
 	//TODO: compute the attenuation of the light using Lambertian::evaluate():
-	ret.attenuation = Spectrum{};
+	ret.attenuation = evaluate(out, ret.direction, uv);
 
 	return ret;
 }
@@ -64,9 +79,10 @@ Scatter Lambertian::scatter(RNG &rng, Vec3 out, Vec2 uv) const {
 float Lambertian::pdf(Vec3 out, Vec3 in) const {
 	//A3T4: Materials - Lambertian BSDF probability density function
     // Compute the PDF for sampling in_dir from the cosine-weighted hemisphere distribution.
-	[[maybe_unused]] Samplers::Hemisphere::Cosine sampler; //this might be handy!
+	Samplers::Hemisphere::Cosine sampler; //this might be handy!
 
-    return 0.0f;
+    return sampler.pdf(in);
+    
 }
 
 Spectrum Lambertian::emission(Vec2 uv) const {
@@ -93,8 +109,8 @@ Scatter Mirror::scatter(RNG &rng, Vec3 out, Vec2 uv) const {
 	// Similar to albedo, reflectance represents the ratio of incoming light to reflected light
 
     Scatter ret;
-    ret.direction = Vec3();
-    ret.attenuation = Spectrum{};
+    ret.direction = reflect(out);
+    ret.attenuation = reflectance.lock()->evaluate(uv);
     return ret;
 }
 
@@ -128,8 +144,15 @@ Scatter Refract::scatter(RNG &rng, Vec3 out, Vec2 uv) const {
 	//  You do not need to scale by the Fresnel Coefficient - you'll only need to account for the correct ratio of indices of refraction
 
     Scatter ret;
-    ret.direction = Vec3();
-    ret.attenuation = Spectrum{};
+    
+    bool was_internal = false;
+    ret.direction = refract(out, ior, was_internal);
+    
+    if(was_internal) {
+        ret.direction = out;
+        ret.direction.y *= -1;
+    }
+    ret.attenuation = transmittance.lock()->evaluate(uv);
     return ret;
 }
 
