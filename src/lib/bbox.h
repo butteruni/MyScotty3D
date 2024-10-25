@@ -98,19 +98,17 @@ struct BBox {
 		// This means at least one of tmin and tmax must be within the range
         Vec3 origin = ray.point;
         Vec3 d = 1.f / ray.dir;
-        float tmax = times.y, tmin = times.x; 
         for(size_t i = 0; i < 3; ++i) {
             float t0 = (min[i] - origin[i]) * d[i];
             float t1 = (max[i] - origin[i]) * d[i];
-            if(d[i] < 0.f) {
+            if(t0 > t1)
                 std::swap(t0, t1);
-            }
-            tmin = std::max(tmin, t0);
-            tmax = std::min(tmax, t1);
-            if(tmax < tmin)
+            if(t0 > times.y || t1 < times.x) {
                 return false;
+            }
+            times.x = std::max(times.x, t0);
+            times.y = std::min(times.y, t1);
         }
-        times = Vec2(tmin, tmax);
         return true;
     }
 
