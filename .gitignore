@@ -9,4 +9,5 @@ README-SDL.txt
 SDL2.dll
 nest-libs/
 handin*
+tests/
 *.tar.*
