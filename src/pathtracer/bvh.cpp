@@ -154,36 +154,41 @@ template<typename Primitive> Trace BVH<Primitive>::hit(const Ray& ray) const {
     if(primitives.size() == 0) {
         return ret;
     }
-    std::stack<size_t> s;
-    Vec2 time = Vec2(0.f, FLT_MAX);
-    s.push(root_idx);
-    auto hit_check = [&](size_t idx) {
+   //  std::cout << "LIGHT DIR: " << ray.dir << '\n';
+   //  std::cout << "LIGHT ORIGIN: " << ray.point << '\n';
+    std::function<void(size_t)> hit_check = [&](size_t idx) {
         auto &node = nodes[idx];
         if(node.is_leaf()) {
+            // std::cout << node.bbox << '\n';
             for(size_t i = node.start; i < node.start + node.size; ++i) {
                 Trace hit = primitives.at(i).hit(ray); 
-                if(hit.hit)
-                    time[1] = std::min(time[1], hit.distance); 
                 ret = Trace::min(ret, hit);
             }
-        }else {        
-            Vec2 tmp = time; 
-            bool leftHit = nodes[node.l].bbox.hit(ray, tmp);
-            tmp = time;
-            bool rightHit = nodes[node.r].bbox.hit(ray, tmp);
-            if(leftHit) {
-                s.push(node.l);
+        }else {     
+            Vec2 ray_dist_bounds_L = ray.dist_bounds;
+            auto distL = nodes[node.l].bbox.hit(ray, ray_dist_bounds_L) ? ray_dist_bounds_L.x: FLT_MAX;
+            Vec2 ray_dist_bounds_R = ray.dist_bounds;
+            auto distR = nodes[node.r].bbox.hit(ray, ray_dist_bounds_R) ? ray_dist_bounds_R.x: FLT_MAX;
+            auto first  = node.l;
+            auto second = node.r;
+            if (distL > distR) {
+                std::swap(distL, distR);
+                std::swap(first, second);
             }
-            if(rightHit) {
-                s.push(node.r);
+            if(distL == FLT_MAX) {
+                return;
+            } 
+            hit_check(first);
+            if (!ret.hit || distR < ret.distance) {
+                hit_check(second);
             }
         }
     };
-    while(s.size()) {
-        size_t idx = s.top();
-        s.pop();
-        hit_check(idx);
-    }
+    hit_check(0);
+    // for(const Primitive &p : primitives) {
+    //     Trace hit = p.hit(ray);
+    //     ret = Trace::min(ret, hit);
+    // }
     return ret;
 }
 
