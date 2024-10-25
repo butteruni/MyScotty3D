@@ -10,8 +10,7 @@ Vec3 reflect(Vec3 dir) {
     // Return direction to incoming light that would be
 	// reflected out in direction dir from surface
 	// with normal (0,1,0)
-    Vec3 normal = Vec3(0, 1, 0);
-    return -dir + 2 * dot(normal, dir) * normal;
+    return Vec3(-dir.x, dir.y, -dir.z);
 }
 
 Vec3 refract(Vec3 out_dir, float index_of_refraction, bool& was_internal) {
@@ -25,27 +24,44 @@ Vec3 refract(Vec3 out_dir, float index_of_refraction, bool& was_internal) {
 	// The surface normal is (0,1,0)
     Vec3 normal = Vec3(0.f, 1.f, 0.f);
     float cosTheta_i = dot(normal, out_dir);
-    float eta = index_of_refraction;
+    float eta_i = 1.f;
+    float eta_t = index_of_refraction;
+    // leaving
     if(cosTheta_i < 0) {
-        eta = 1.f / eta;
-        normal *= -1;
-        cosTheta_i *= -1;
+        std::swap(eta_i, eta_t);
     }
-    float sin2Theta_i = std::max(0.f, 1.f - cosTheta_i * cosTheta_i);
-    float sin2Theta_t = sin2Theta_i / (eta * eta);
-    float cosTheta_t = std::sqrt(1.f - sin2Theta_t);
-
-    return  -out_dir / eta + (cosTheta_i / eta - cosTheta_t) * normal; 
+    eta_i *= eta_i;
+    eta_t *= eta_t;
+    float sin2Theta_i = 1.f - cosTheta_i * cosTheta_i;
+    float sin2Theta_t = eta_i / eta_t * sin2Theta_i;
+    if(sin2Theta_t > 1) {
+        was_internal = true;
+        return Vec3{};
+    }
+    float ratio = -std::sqrt(sin2Theta_t / sin2Theta_i);
+    float x = out_dir.x * ratio;
+    float y = -std::sqrt(1.f - sin2Theta_t);
+    if(cosTheta_i < 0) {
+        y = -y;
+    }
+    float z = out_dir.z * ratio;
+    return Vec3(x, y, z);
 }
 
 float schlick(Vec3 in_dir, float index_of_refraction) {
 	//A3T5 Materials - Schlick's approximation helper
 
 	// Implement Schlick's approximation of the Fresnel reflection factor.
+    float eta_i = 1.f;
+    float eta_t = index_of_refraction;
     float cos_theta = in_dir.y; 
-    float r0 = pow((1.0f - index_of_refraction) / (1.0f + index_of_refraction), 2.0f);
-    return r0 + (1.0f - r0) * pow(1.0f - cos_theta, 5.0f);
-	return 0.0f;
+    if(cos_theta < 0) {
+        cos_theta *= -1;
+        std::swap(eta_i, eta_t);
+    }
+    float r0 = (eta_i - eta_t) / (eta_i + eta_t);
+    r0 *= r0;
+    return r0 + (1.0f - r0) * std::pow(1.0f - cos_theta, 5.0f);
 }
 
 Spectrum Lambertian::evaluate(Vec3 out, Vec3 in, Vec2 uv) const {
@@ -55,9 +71,11 @@ Spectrum Lambertian::evaluate(Vec3 out, Vec3 in, Vec2 uv) const {
     // is reflected through out_dir: (albedo / PI_F) * cos(theta).
     // Note that for Scotty3D, y is the 'up' direction.
 
-    Spectrum tmp = albedo.lock()->evaluate(uv);
+    Spectrum albedo_value = albedo.lock()->evaluate(uv);
+    float cos_theta = std::max(0.f, dot(Vec3(0, 1, 0), in));
+    Spectrum ret = albedo_value * cos_theta / PI_F;
 
-    return tmp / PI_F * in.y;
+    return ret;
 }
 
 Scatter Lambertian::scatter(RNG &rng, Vec3 out, Vec2 uv) const {
@@ -147,12 +165,10 @@ Scatter Refract::scatter(RNG &rng, Vec3 out, Vec2 uv) const {
     
     bool was_internal = false;
     ret.direction = refract(out, ior, was_internal);
-    
-    if(was_internal) {
-        ret.direction = out;
-        ret.direction.y *= -1;
-    }
     ret.attenuation = transmittance.lock()->evaluate(uv);
+    if(was_internal) {
+        ret.attenuation = Spectrum(0.f);
+    }
     return ret;
 }
 
@@ -202,8 +218,16 @@ Scatter Glass::scatter(RNG &rng, Vec3 out, Vec2 uv) const {
 	//  You do not need to scale by the Fresnel Coefficient - you'll only need to account for the correct ratio of indices of refraction
 
     Scatter ret;
-    ret.direction = Vec3();
-    ret.attenuation = Spectrum{};
+    float reflect_factor = schlick(out, ior);
+    if(rng.coin_flip(reflect_factor)) {
+        ret.direction = reflect(out);
+        ret.attenuation = reflectance.lock()->evaluate(uv);
+    }else {
+        bool was_internal = false;
+        ret.direction = refract(out, ior, was_internal);
+        Spectrum attenuation = transmittance.lock()->evaluate(uv);
+        ret.attenuation = was_internal ? Spectrum(0.f) : attenuation;
+    }
     return ret;
 }
 

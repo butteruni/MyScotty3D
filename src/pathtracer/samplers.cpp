@@ -1,8 +1,8 @@
 
 #include "samplers.h"
 #include "../util/rand.h"
-
-constexpr bool IMPORTANCE_SAMPLING = true;
+#include "../scene/shape.h"
+constexpr bool IMPORTANCE_SAMPLING = false;
 
 namespace Samplers {
 
@@ -108,8 +108,11 @@ Vec3 Sphere::Uniform::sample(RNG &rng) const {
 
     // Generate a uniformly random point on the unit sphere.
     // Tip: start with Hemisphere::Uniform
-
-    return Vec3{};
+	Vec3 dir = hemi.sample(rng);
+	if(rng.coin_flip(0.5f)) {
+		dir.y = -dir.y;
+	}
+    return dir;
 }
 
 float Sphere::Uniform::pdf(Vec3 dir) const {
@@ -125,18 +128,42 @@ Sphere::Image::Image(const HDR_Image& image) {
     const auto [_w, _h] = image.dimension();
     w = _w;
     h = _h;
+	auto size = image.data().size();
+	_pdf.resize(size);
+	_cdf.resize(size);
+	for(size_t i = 0; i < size; i++) {
+		size_t row_idx = i / w;
+		float theta = PI_F - ((float)row_idx + 0.5f) / (float) h * PI_F;
+		_pdf[i] = image.at(i).luma() * std::sin(theta);
+		_cdf[i] = _pdf[i] + (i == 0? 0.0f: _cdf[i-1]);
+	}
+	float total = _cdf.back();
+	for (size_t i = 0; i < size; ++i) {
+		_pdf[i] /= total;
+		_cdf[i] /= total;
+    }
 }
 
 Vec3 Sphere::Image::sample(RNG &rng) const {
 	if(!IMPORTANCE_SAMPLING) {
 		// Step 1: Uniform sampling
 		// Declare a uniform sampler and return its sample
-    	return Vec3{};
+    	auto uniform_sampler = Uniform();
+    	return uniform_sampler.sample(rng);
 	} else {
 		// Step 2: Importance sampling
 		// Use your importance sampling data structure to generate a sample direction.
 		// Tip: std::upper_bound
-    	return Vec3{};
+    	float p = rng.unit();
+		size_t i = std::upper_bound(_cdf.begin(), _cdf.end(), p) - _cdf.begin();
+		size_t row_idx = i / w;
+		size_t col_idx = i % w;
+		float theta = PI_F - ((float)row_idx + 0.5f) / (float) h * PI_F;
+		float phi  = ((float)col_idx + 0.5f) / (float) w * PI_F * 2;
+		float y_s = std::cos(theta);
+		float x_s = std::sin(theta) * std::cos(phi);
+		float z_s = std::sin(theta) * std::sin(phi);
+    	return Vec3{x_s, y_s, z_s};
 	}
 }
 
@@ -144,11 +171,22 @@ float Sphere::Image::pdf(Vec3 dir) const {
     if(!IMPORTANCE_SAMPLING) {
 		// Step 1: Uniform sampling
 		// Declare a uniform sampler and return its pdf
-    	return 0.f;
+    	auto uniform_sampler = Uniform();
+    	return uniform_sampler.pdf(dir);
 	} else {
 		// A3T7 - image sampler importance sampling pdf
 		// What is the PDF of this distribution at a particular direction?
-    	return 0.f;
+    	Vec2 uv = Shapes::Sphere::uv(dir);
+		// uv.x is longitude phi, \in [0, 1)
+        // uv.y is latitude theta, \in (0, 1) 
+		size_t col_index = std::clamp((size_t)((float)w * uv.x- 0.5f), 0ul, w- 1ul);
+		size_t rol_index = std::clamp((size_t)((float)h * (1 -uv.y)- 0.5f), 0ul, h- 1ul);
+		size_t i = rol_index  * w + col_index;
+
+		float jacobian = float(w * h) * 0.5f / PI_F / PI_F / std::sin(uv.y * PI_F);
+        auto p = _pdf[i] * jacobian;
+
+        return p;
 	}
 }
 
