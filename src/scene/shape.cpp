@@ -40,23 +40,29 @@ PT::Trace Sphere::hit(Ray ray) const {
 
     Vec3 o = ray.point;
     Vec3 d = ray.dir;
-    float a = d.norm_squared();
+    float a = d.unit().norm_squared();
     float b = 2 * dot(o, d);
     float c = o.norm_squared() - radius * radius;
-    float t1 = (-b + std::sqrt(b * b - 4 * a * c)) / (2 * a);
-    float t2 = (-b - std::sqrt(b * b - 4 * a * c)) / (2 * a);
-    if(t1 > 0 && t2 < 0) {
-        ret.hit = true;
-        ret.position = o + d * t1;
+    float discriminant = b * b - 4 * a * c;
+    if(discriminant < 0) {
+        return ret;
     }
-    if(t2 > 0) {
-        ret.hit = true;
-        ret.position = o + d * t2;
+    float t1 = (-b - std::sqrt(discriminant)) / (2 * a);
+    float t2 = (-b + std::sqrt(discriminant)) / (2 * a);
+    float t = t1;
+
+	if (ray.dist_bounds.x > t || t > ray.dist_bounds.y)
+	    t = t2;
+	if (ray.dist_bounds.x > t || t > ray.dist_bounds.y) {
+        ret.hit = false;
+        return ret;
     }
-    ret.distance = (ret.position - ret.origin).norm();
+    ret.hit = true;
+    ret.distance = t;
+    ret.position = ray.at(t);
     Vec3 dir = ret.position;
-    ret.uv = uv(dir.normalize());
-    ret.normal = dir;
+    ret.uv = uv(dir);
+    ret.normal = dir.unit();
     return ret;
 }
 
