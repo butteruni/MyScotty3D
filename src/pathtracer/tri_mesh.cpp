@@ -67,14 +67,17 @@ Trace Triangle::hit(const Ray& ray) const {
     if(v < 0 || u + v > 1)
         return ret;
     float t = -dot(cross(s, e2), e1) / denom;
-    if(t < 0) {
+    if(ray.dist_bounds.x > t || t > ray.dist_bounds.y) {
         return ret;
     }
     ret.hit = true;
-    ret.position = v_0.position + u * e1 + v * e2;
-    ret.distance = (ret.position - ret.origin).norm();
-    ret.normal = (1.f - u - v) * v_0.normal + u * v_1.normal + v * v_2.normal;
+    ret.position = ray.at(t);
+    ret.distance = t;
+    ret.normal = ((1.f - u - v) * v_0.normal + u * v_1.normal + v * v_2.normal).unit();
     ret.uv = (1.f - u - v) * v_0.uv + u * v_1.uv + v * v_2.uv;
+    if (ret.distance < ray.dist_bounds.x || ret.distance > ray.dist_bounds.y) {
+		ret.hit = false;
+	}
     return ret;
 }
 
