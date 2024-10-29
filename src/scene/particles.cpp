@@ -1,24 +1,45 @@
 
 #include "particles.h"
-
+#include <iostream>
 bool Particles::Particle::update(const PT::Aggregate &scene, Vec3 const &gravity, const float radius, const float dt) {
 
 	//A4T4: particle update
 
 	// Compute the trajectory of this particle for the next dt seconds.
-
-	// (1) Build a ray representing the particle's path as if it travelled at constant velocity.
-
-	// (2) Intersect the ray with the scene and account for collisions. Be careful when placing
-	// collision points using the particle radius. Move the particle to its next position.
-
-	// (3) Account for acceleration due to gravity after updating position.
-
-	// (4) Repeat until the entire time step has been consumed.
-
-	// (5) Decrease the particle's age and return 'false' if it should be removed.
-
-	return false;
+    float cur_t = 0;
+    while(cur_t < dt) {
+    // (1) Build a ray representing the particle's path as if it travelled at constant velocity.
+       if(velocity.norm() == 0) {
+            velocity += (dt - cur_t) * gravity;
+            cur_t = dt;
+            break;
+        } 
+        Ray ray(position, velocity, Vec2(0.f, (dt - cur_t) * velocity.norm() + radius));
+    // (2) Intersect the ray with the scene and account for collisions. Be careful when placing
+    // collision points using the particle radius. Move the particle to its next position.
+        auto trace = scene.hit(ray);
+        float step = 0;
+        if(trace.hit) {
+            step = (trace.distance - radius) / velocity.norm()  ;
+        }else {
+            step = dt - cur_t;
+        }
+        position += step * velocity;
+        if(trace.hit) {
+            Vec3 normal = trace.normal.unit();
+            velocity.x -= 2 * velocity.x * normal.x;
+            velocity.y -= 2 * velocity.y * normal.y;
+            velocity.z -= 2 * velocity.z * normal.z;
+        }
+        velocity += step * gravity;
+        cur_t += step;
+    // (3) Account for acceleration due to gravity after updating position.
+    
+    // (4) Repeat until the entire time step has been consumed.
+    }
+    // (5) Decrease the particle's age and return 'false' if it should be removed.
+    age -= dt;
+	return age > 0;
 }
 
 void Particles::advance(const PT::Aggregate& scene, const Mat4& to_world, float dt) {
